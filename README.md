@@ -564,6 +564,12 @@ python scripts/verify_repo.py
 RESULT: ALL OK
 ```
 
+Веса адаптеров и OCR-датасет хранятся в репозитории через Git LFS. Если по какой-то причине LFS-объекты не скачиваются, те же файлы продублированы на Hugging Face:
+
+- BAD adapter: https://huggingface.co/large-language-leonid/bad_adapter
+- FIRE adapter: https://huggingface.co/large-language-leonid/fire_adapter
+- OCR датасет: https://huggingface.co/datasets/large-language-leonid/e_cup_2026_ocr
+
 ## Сборка submission
 
 ```bash
