@@ -1,0 +1,3 @@
+﻿date,notebook,final_component,role,notebook_sha256
+2026-08-12,notebooks/final_adapters/01_OLD_BAD_ecup2026_phase3_qwen35_qlora.ipynb,OLD BAD,Phase 3 Qwen3.5-4B QLoRA training lineage; final BAD selected later by exact SHA256,18945730bbf124e74ae60cd2cffb9f2c8e39faec941f23fa05a73a3fdb4a261a
+2026-08-15,notebooks/final_adapters/02_NEW_FIRE_qwen35_FSDP_FULLTEXT_2xT4_FINAL.ipynb,NEW FIRE,FIRE-only Qwen3.5-4B FSDP-QLoRA + full HQ OCR training,53e7ee114ca5dd5d59126759a8bafbe7babe492a5c71bb981328f2375ed114d1

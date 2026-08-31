@@ -1,0 +1,66 @@
+{
+  "project": "E-CUP 2026 Quality Control — 2nd place private leaderboard",
+  "base_model": "/shared_models/Qwen/Qwen3.5-4B",
+  "ocr_model": "/shared_models/PaddlePaddle/PaddleOCR-VL-1.5",
+  "final_profiles": {
+    "hybrid_a_t050": {
+      "score": 0.9024064171122994,
+      "bad_threshold": 0.5,
+      "fire_threshold": 0.5,
+      "composition": "OLD BAD + NEW FIRE"
+    },
+    "private_best_t012": {
+      "score": 0.9042222978144401,
+      "bad_threshold": 0.12,
+      "fire_threshold": 0.5,
+      "composition": "OLD BAD + NEW FIRE"
+    }
+  },
+  "artifacts": {
+    "runtime/hybrid_a_t050/run.py": {
+      "sha256": "0fa9229810f90d26d8a1c923c4ed6c4b195e99ba3c7800c94c44f1f16987bd3e",
+      "bytes": 21209
+    },
+    "runtime/private_best_t012/run.py": {
+      "sha256": "a0d89f62d57dedd2cb4e9eaf0eeea606c6b7c58e02336fb9f466d89e7a7b83a5",
+      "bytes": 21277
+    },
+    "runtime/common/metadata.json": {
+      "sha256": "2e84e4db7be7e3f5d6b7b1fae53b0395eb1a6b913704db6dc4f0b39c51095812",
+      "bytes": 87
+    },
+    "adapters/old_bad/adapter_config.json": {
+      "sha256": "291d201a9f049f410c80f8744a9ebda57e4f1ecc10e24904c68ddfec1e8fa391",
+      "bytes": 1323
+    },
+    "adapters/old_bad/adapter_model.safetensors": {
+      "sha256": "5a0da02c0bbca13fe0cb7257d85fb407422b705f56d6e449d59acbab1a49984d",
+      "bytes": 129934448
+    },
+    "adapters/new_fire/adapter_config.json": {
+      "sha256": "278b0025d98a0100ef2f5343c69c01aee5bba7029e28dca9642a36ee2330b45b",
+      "bytes": 1323
+    },
+    "adapters/new_fire/adapter_model.safetensors": {
+      "sha256": "6bd02b7950e312d69d3e657b1e7bf61d84c1c07a92ae1a7fdb84c0cb00e55d01",
+      "bytes": 129934448
+    },
+    "wheels/peft-0.20.0-py3-none-any.whl": {
+      "sha256": "0fbba16ffebfad3de96e06f2da6860fd860292324b85b6141909fa1e26ea9233",
+      "bytes": 775777
+    }
+  },
+  "provenance": {
+    "source": "exact original competition ZIP archives supplied by participant on 2026-08-31",
+    "private_best_archive": {
+      "path": "submissions/original/run_old_012.zip",
+      "sha256": "ce87c10462da5ade2aff9d3b69c8b78cdaf4b276d0601a05b632c369f0b71636",
+      "bytes": 241490584
+    },
+    "hybrid_a_archive": {
+      "path": "submissions/original/ecup_HYBRID_A_OLD_BAD_NEW_FIRE.zip",
+      "sha256": "63830b5412d8828f30dc4ad2019f608c8cda8b9072ee42609973b3eb05025611",
+      "bytes": 241489448
+    }
+  }
+}

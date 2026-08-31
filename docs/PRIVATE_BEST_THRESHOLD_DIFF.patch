@@ -1,0 +1,15 @@
+--- ORIGINAL: ecup_HYBRID_A_OLD_BAD_NEW_FIRE.zip/run.py
++++ ORIGINAL: run_old_012.zip/run.py
+@@ -474,9 +474,11 @@
+                     logits = out.logits[:, -1, [zero_id, one_id]].float()
+                     probs = torch.softmax(logits, dim=-1)[:, 1].cpu().numpy()
+ 
++                threshold = 0.12 if category == BAD else 0.5
++
+                 for j, p1 in zip(batch_idxs, probs):
+                     p1s[j] = float(p1)
+-                    preds[j] = int(p1 >= 0.5)
++                    preds[j] = int(p1 >= threshold)
+ 
+                 pos += len(batch_idxs)
+                 elapsed = time.time() - started
