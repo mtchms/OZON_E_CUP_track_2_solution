@@ -1,39 +1,65 @@
 # Воспроизводимость
 
-## 1. Проверить файлы
+Репозиторий содержит один финальный runtime:
+
+```text
+runtime/bad_t012_fire_t050/run.py
+```
+
+Корневой `run.py` должен быть побитово идентичен этому файлу.
+
+## Проверка артефактов
+
+Из корня репозитория:
 
 ```bash
 python scripts/verify_repo.py
 ```
 
-Скрипт проверяет SHA256:
+Скрипт проверяет SHA256 следующих файлов:
 
-- двух adapter weights;
-- двух `adapter_config.json`;
-- обоих `run.py`;
-- `metadata.json`;
-- локального PEFT wheel.
+- `adapters/bad/adapter_model.safetensors`
+- `adapters/bad/adapter_config.json`
+- `adapters/fire/adapter_model.safetensors`
+- `adapters/fire/adapter_config.json`
+- `run.py`
+- `runtime/bad_t012_fire_t050/run.py`
+- `metadata.json`
+- `wheels/peft-0.20.0-py3-none-any.whl`
 
-## 2. Собрать основной submission
+Также проверяется, что корневой `run.py` побитово идентичен
+`runtime/bad_t012_fire_t050/run.py`.
+
+При успешной проверке:
+
+```text
+RESULT: ALL OK
+```
+
+## Сборка submission
 
 ```bash
 python scripts/build_submission.py --variant bad_t012_fire_t050
 ```
 
-## 3. Собрать вариант с threshold 0.50 / 0.50
-
-```bash
-python scripts/build_submission.py --variant bad_t050_fire_t050
-```
-
-Оба ZIP используют одни и те же adapters:
+В submission используются:
 
 ```text
-adapters/bad/
-adapters/fire/
-```
+run.py
+metadata.json
 
-и различаются только `run.py`.
+adapters/
+  bad/
+    adapter_config.json
+    adapter_model.safetensors
+
+  fire/
+    adapter_config.json
+    adapter_model.safetensors
+
+wheels/
+  peft-0.20.0-py3-none-any.whl
+```
 
 ## Competition runtime
 
@@ -46,9 +72,23 @@ adapters/fire/
 
 Entry point:
 
-```text
+```bash
 python -u run.py
 ```
 
-Основной runtime в корне репозитория (`run.py`) идентичен
-`runtime/bad_t012_fire_t050/run.py`.
+Финальные thresholds:
+
+```text
+БАД: 0.12
+Легковоспламеняющиеся: 0.50
+```
+
+## Финальная проверка перед отправкой
+
+```bash
+python scripts/verify_repo.py
+python scripts/build_submission.py --variant bad_t012_fire_t050
+```
+
+После этого необходимо убедиться, что итоговый ZIP содержит `run.py`,
+`metadata.json`, оба LoRA adapter и локальный PEFT wheel.
