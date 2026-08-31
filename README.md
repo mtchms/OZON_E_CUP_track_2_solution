@@ -7,16 +7,12 @@
 - БАД
 - Легковоспламеняющиеся
 
-Организаторы не отображают значение Private score. Из закрытого лидерборда известен только итоговый результат - 2-е место.
+Финальный результат на Private Leaderboard:
 
-Два score ниже относятся только к Public Leaderboard.
-
-| Вариант inference | Threshold для БАД | Threshold для Легковоспламеняющиеся | Public LB |
-|---|---:|---:|---:|
-| Основной финальный вариант | **0.12** | 0.50 | **0.9042222978144401** |
-| Вариант с threshold 0.50 для обеих категорий | 0.50 | 0.50 | **0.9024064171122994** |
-
-Оба варианта используют одни и те же веса моделей. Отличается только threshold для категории БАД.
+```text
+2-е место
+Private score = 0,8717948718
+```
 
 ![Private LB](assets/private_lb.png)
 
@@ -319,47 +315,11 @@ Runtime сделан fault-tolerant. Если OCR не удалось получ
 P(label = 1)
 ```
 
-Для основного финального варианта:
+Для финального варианта:
 
 ```python
 threshold = 0.12 if category == BAD else 0.5
 pred = int(p1 >= threshold)
-```
-
-Public LB:
-
-```text
-0.9042222978144401
-```
-
-Для второго сохранённого варианта:
-
-```python
-pred = int(p1 >= 0.5)
-```
-
-Public LB:
-
-```text
-0.9024064171122994
-```
-
-Между двумя вариантами не менялись:
-
-- веса адаптера БАД
-- config адаптера БАД
-- веса адаптера Легковоспламеняющиеся
-- config адаптера Легковоспламеняющиеся
-- preprocessing
-- OCR runtime
-- Qwen runtime
-
-Изменился только threshold для категории БАД.
-
-Точный diff двух runtime находится в:
-
-```text
-docs/RUNTIME_THRESHOLD_DIFF.patch
 ```
 
 ## Структура репозитория
@@ -390,25 +350,19 @@ docs/RUNTIME_THRESHOLD_DIFF.patch
 |  \- train_fire_adapter.ipynb
 |
 |- runtime/
-|  |- bad_t012_fire_t050/
-|  |  \- run.py
-|  |
-|  \- bad_t050_fire_t050/
+|  \- bad_t012_fire_t050/
 |     \- run.py
 |
 |- scripts/
 |  |- verify_repo.py
-|  |- build_submission.py
-|  \- compare_runtimes.py
+|  \- build_submission.py
 |
 |- docs/
 |  |- ARTIFACTS.md
-|  |- REPRODUCIBILITY.md
-|  \- RUNTIME_THRESHOLD_DIFF.patch
+|  \- REPRODUCIBILITY.md
 |
 |- assets/
-|  |- public_lb_0.9042222978.png
-|  \- public_lb_0.9024064171.png
+|  \- private_lb.png
 |
 \- wheels/
    \- peft-0.20.0-py3-none-any.whl
@@ -425,7 +379,6 @@ docs/RUNTIME_THRESHOLD_DIFF.patch
 | FIRE adapter weights | `6bd02b7950e312d69d3e657b1e7bf61d84c1c07a92ae1a7fdb84c0cb00e55d01` |
 | FIRE adapter config | `278b0025d98a0100ef2f5343c69c01aee5bba7029e28dca9642a36ee2330b45b` |
 | Runtime BAD=0.12, FIRE=0.50 | `a0d89f62d57dedd2cb4e9eaf0eeea606c6b7c58e02336fb9f466d89e7a7b83a5` |
-| Runtime BAD=0.50, FIRE=0.50 | `0fa9229810f90d26d8a1c923c4ed6c4b195e99ba3c7800c94c44f1f16987bd3e` |
 | metadata.json | `2e84e4db7be7e3f5d6b7b1fae53b0395eb1a6b913704db6dc4f0b39c51095812` |
 | PEFT wheel | `0fbba16ffebfad3de96e06f2da6860fd860292324b85b6141909fa1e26ea9233` |
 
@@ -449,12 +402,6 @@ RESULT: ALL OK
 python scripts/build_submission.py --variant bad_t012_fire_t050
 ```
 
-Вариант с threshold 0.50 для обеих категорий:
-
-```bash
-python scripts/build_submission.py --variant bad_t050_fire_t050
-```
-
 Готовые архивы создаются в:
 
 ```text
@@ -475,16 +422,9 @@ odsai/ecup26-quality-baseline:1.0
 
 ## Результат
 
-Лучшая публичная отправка:
-
-```text
-Public LB = 0.9042222978144401
-```
-
 Итог соревнования:
 
 ```text
 Private Leaderboard = 2-е место
+Private score = 0,8717948718
 ```
-
-Private score организаторами не отображается.
