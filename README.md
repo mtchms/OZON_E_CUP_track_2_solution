@@ -75,6 +75,8 @@ name + description
                   final prediction
 ```
 
+## Гипотезы
+
 ## Базовая модель
 
 Используется:
