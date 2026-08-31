@@ -516,6 +516,7 @@ pred = int(p1 >= threshold)
 |     \- ocr_all_products_high_quality.csv
 |
 |- notebooks/
+|  |- ocr_all_data.ipynb
 |  |- train_bad_adapter.ipynb
 |  \- train_fire_adapter.ipynb
 |
@@ -528,7 +529,10 @@ pred = int(p1 >= threshold)
 |  \- REPRODUCIBILITY.md
 |
 |- assets/
-|  \- private_lb.png
+|  |- private_lb.png
+|  \- research/
+|     |- bad_threshold_f1.png
+|     \- bad_threshold_precision_recall.png
 |
 \- wheels/
    \- peft-0.20.0-py3-none-any.whl
@@ -544,7 +548,7 @@ pred = int(p1 >= threshold)
 | BAD adapter config | `291d201a9f049f410c80f8744a9ebda57e4f1ecc10e24904c68ddfec1e8fa391` |
 | FIRE adapter weights | `6bd02b7950e312d69d3e657b1e7bf61d84c1c07a92ae1a7fdb84c0cb00e55d01` |
 | FIRE adapter config | `278b0025d98a0100ef2f5343c69c01aee5bba7029e28dca9642a36ee2330b45b` |
-| Runtime BAD=0.12, FIRE=0.50 | `a0d89f62d57dedd2cb4e9eaf0eeea606c6b7c58e02336fb9f466d89e7a7b83a5` |
+| run.py (entry point) | `a0d89f62d57dedd2cb4e9eaf0eeea606c6b7c58e02336fb9f466d89e7a7b83a5` |
 | metadata.json | `2e84e4db7be7e3f5d6b7b1fae53b0395eb1a6b913704db6dc4f0b39c51095812` |
 | PEFT wheel | `0fbba16ffebfad3de96e06f2da6860fd860292324b85b6141909fa1e26ea9233` |
 
@@ -562,16 +566,14 @@ RESULT: ALL OK
 
 ## Сборка submission
 
-Основной вариант:
-
 ```bash
-python scripts/build_submission.py --variant bad_t012_fire_t050
+python scripts/build_submission.py
 ```
 
-Готовые архивы создаются в:
+Готовый архив создаётся в корне репозитория:
 
 ```text
-submission_out/
+submission_final.zip
 ```
 
 Competition entry point:
