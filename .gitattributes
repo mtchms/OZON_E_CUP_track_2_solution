@@ -1,1 +1,2 @@
 *.safetensors filter=lfs diff=lfs merge=lfs -text
+data/ocr/*.csv filter=lfs diff=lfs merge=lfs -text
