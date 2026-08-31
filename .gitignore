@@ -1,5 +1,6 @@
 __pycache__/
-*.pyc
-.DS_Store
-.ecup_runtime_cache/
+*.py[cod]
+.ipynb_checkpoints/
 submission_out/
+*.zip
+.DS_Store
