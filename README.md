@@ -519,10 +519,6 @@ pred = int(p1 >= threshold)
 |  |- train_bad_adapter.ipynb
 |  \- train_fire_adapter.ipynb
 |
-|- runtime/
-|  \- bad_t012_fire_t050/
-|     \- run.py
-|
 |- scripts/
 |  |- verify_repo.py
 |  \- build_submission.py
