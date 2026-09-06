@@ -1,5 +1,6 @@
 import argparse
 import gc
+import html
 import importlib.util
 import math
 import os
@@ -7,6 +8,7 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 from pathlib import Path
 
 import numpy as np
@@ -57,6 +59,47 @@ FIRE_RULES = """Правила Легковоспламеняющиеся:
 - не относится: источник воспламенения встроен;
 - не относится: горючий материал только компонент;
 - не относится: опасный предмет не входит в комплект."""
+
+TRIM_MARKER = "\n...[середина сокращена]...\n"
+MIN_VISIBLE_ALPHA = 0.42
+MAX_TRACE_CANDIDATES = 120
+MIN_STATE_RULE_SIMILARITY = 0.12
+MIN_STATE_RULE_GAP = 0.005
+STATE_DECISION_WEIGHT = 0.025
+STATE_DIRECTION_WEIGHT = 0.015
+
+_BAD_TERM = r"(?:бад(?:ом|ами)?|биологическ\w*\s+активн\w*\s+добавк\w*|dietary\s+supplement)"
+_DIRECT_NOT_BAD = re.compile(
+    rf"(?:\bне\s+(?:явля\w*|счита\w*|относ\w*)\s+(?:к\s+)?{_BAD_TERM}\b|\b(?:это|товар|продукт)\s+не\s+{_BAD_TERM}\b|\bне\s+{_BAD_TERM}\b|\bnot\s+(?:an?\s+)?dietary\s+supplement\b)",
+    re.I,
+)
+_COORDINATED_NOT_BAD = re.compile(
+    r"\bне\s+явля\w*\s+(?:лекар\w+(?:\s+средств\w*)?)\s*,?\s*(?:и|или)\s+(?:не\s+явля\w*\s+)?бад\b",
+    re.I,
+)
+_SPORT_DIRECT = re.compile(
+    r"\b(?:спортивн\w*\s+(?:питан\w*|добавк\w*)|спортпит\w*|sports?\s+nutrition)\b", re.I
+)
+_SPORT_REFERENCE = re.compile(
+    r"\b(?:част\w*\s+(?:систем\w*|комплекс\w*)|дополн\w*|совмещ\w*|применя\w*|производств\w*|рын\w*|мир\w*)\b[^.!?;]{0,80}\b(?:спортивн\w*\s+питан\w*|спортпит\w*)\b|\b(?:включ\w*|добав\w*)\b[^.!?;]{0,80}\b(?:в|к)\s+(?:свой\w*\s+)?(?:систем\w*|комплекс\w*|рацион\w*)\s+спортивн\w*\s+питан\w*\b|\bспортивн\w*\s+питан\w*\s+и\s+(?:косметик\w*|красот\w*)\b|\bспортивн\w*\s+питан\w*\b[^.!?;]{0,70}\b(?:необходим\w*\s+элемент\w*|част\w*)\s+рацион\w*\b",
+    re.I,
+)
+_SPORT_PRODUCT = re.compile(
+    r"\b(?:bcaa|бцаа|l[-\s]?карнитин\w*|л[-\s]?карнитин\w*|левокарнитин\w*|протеин(?:овый|овая|овые|а)?|protein|аминокислотн\w*\s+(?:комплекс\w*|смес\w*|добавк\w*))\b",
+    re.I,
+)
+_SPORT_CONTEXT = re.compile(
+    r"\b(?:спорт\w*|атлет\w*|трениров\w*|мышц\w*|жиросжиг\w*|предтрен\w*|посттрен\w*)\b", re.I
+)
+_BAD_LONG = re.compile(
+    r"\b(?:биологическ\w*\s+активн\w*\s+добавк\w*|dietary\s+supplement)\b", re.I
+)
+_BAD_SHORT = re.compile(r"\bбад\b", re.I)
+_BAD_REFERENCE = re.compile(
+    r"\b(?:для|о|об|рынок|рынка|производств\w*|категори\w*|каталог\w*|магазин\w*|упаковк\w*|контейнер\w*|органайзер\w*|таблетниц\w*|маркировк\w*)\s+(?:для\s+)?бад\b|\bдля\b.{0,30}\bбад\b|\bмежду\b.{0,80}\b(?:бад|биологическ\w*\s+активн\w*\s+добавк\w*)\b|\b(?:схож\w*|сравн\w*)\b.{0,45}\b(?:с\s+)?бад\b|\b(?:употребля\w*|принима\w*|хранен\w*)\b.{0,80}\b(?:бад|биологическ\w*\s+активн\w*\s+добавк\w*)\b|\b(?:лекарств\w*|маз\w*|витамин\w*)\b(?:[^.!?;]{0,55}\s(?:и|или|,))[^.!?;]{0,35}\bбад\b|\bбад\b.{0,35}\b(?:вообще|часто)\b",
+    re.I,
+)
+_PHOTO_MARKER = re.compile(r"\[Фото\s+(\d+)\]", re.I)
 
 
 def norm_id(x):
@@ -135,6 +178,184 @@ def clean_ocr(s):
     s = re.sub(r"[ \t]+", " ", s)
     s = re.sub(r"\n{3,}", "\n\n", s)
     return s.strip()
+
+
+def _plain(value):
+    value = html.unescape(re.sub(r"<[^>]+>", " ", "" if value is None else str(value)))
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _bad_pieces(value, source):
+    raw = "" if value is None else str(value)
+    blocks = []
+    if source == "ocr":
+        marks = list(_PHOTO_MARKER.finditer(raw))
+        if marks:
+            for index, mark in enumerate(marks):
+                end = marks[index + 1].start() if index + 1 < len(marks) else len(raw)
+                blocks.append((_plain(raw[mark.end():end]), int(mark.group(1))))
+        else:
+            blocks.append((_plain(raw), None))
+    else:
+        blocks.append((_plain(raw), None))
+    for text, photo_number in blocks:
+        if not text:
+            continue
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?;])\s+|\s*[•·]\s*", text) if part.strip()]
+        for sentence in sentences or [text]:
+            words = sentence.split()
+            if len(sentence) <= 210:
+                yield sentence, photo_number
+                continue
+            for start in range(0, len(words), 24):
+                piece = " ".join(words[start:start + 34])
+                if piece:
+                    yield piece, photo_number
+                if start + 34 >= len(words):
+                    break
+
+
+def _near_sport_context(text, radius=75):
+    return any(
+        _SPORT_CONTEXT.search(text[max(0, match.start() - radius):min(len(text), match.end() + radius)])
+        for match in _SPORT_PRODUCT.finditer(text)
+    )
+
+
+def _bad_rule_match(text, source):
+    negative = None if source == "name" else (_DIRECT_NOT_BAD.search(text) or _COORDINATED_NOT_BAD.search(text))
+    if negative:
+        return "explicit_not_bad", 100, negative
+    sport = _SPORT_DIRECT.search(text)
+    if sport and (source == "name" or (len(text) >= 35 and not _SPORT_REFERENCE.search(text))):
+        return "sports_nutrition", 90, sport
+    product = _SPORT_PRODUCT.search(text)
+    if product and (source == "name" or _near_sport_context(text)):
+        return "sports_nutrition", 80, product
+    marking = None if source == "name" else _BAD_LONG.search(text)
+    if marking and not _BAD_REFERENCE.search(text):
+        return "bad_marking", 70, marking
+    marking = None if source == "name" else _BAD_SHORT.search(text)
+    if marking and not _BAD_REFERENCE.search(text):
+        return "bad_marking", 60, marking
+    return None
+
+
+def _bad_candidate(source, text, photo_number, rule, priority, match):
+    if len(text) > 165:
+        left = max(0, match.start() - 70)
+        right = min(len(text), match.end() + 90)
+        quote = text[left:right].strip(" ,;:-")
+        quote = ("…" if left else "") + quote + ("…" if right < len(text) else "")
+    else:
+        quote = text
+    return {
+        "source": source,
+        "display_fragment": quote,
+        "char_start": match.start(),
+        "photo_number": photo_number,
+        "regex_rule": rule,
+        "regex_priority": priority,
+    }
+
+
+def select_bad_evidence(row):
+    matches = []
+    for source, value in (("name", row.get("name", "")), ("description", row.get("description", "")), ("ocr", row.get("ocr_text", ""))):
+        for text, photo_number in _bad_pieces(value, source):
+            found = _bad_rule_match(text, source)
+            if found:
+                matches.append(_bad_candidate(source, text, photo_number, *found))
+    if not matches:
+        return None
+    bonus = {"name": 3, "description": 2, "ocr": 1}
+    matches.sort(key=lambda item: (-item["regex_priority"], -bonus[item["source"]], len(item["display_fragment"]), item["char_start"]))
+    top = matches[0]
+    modality = lambda item: "image" if item["source"] == "ocr" else "card"
+    sources = {modality(top)} | {
+        modality(item) for item in matches[1:]
+        if item["regex_rule"] == top["regex_rule"] and modality(item) != modality(top)
+    }
+    top["evidence_sources"] = "+".join(sorted(sources))
+    return top
+
+
+class MappedHTML(HTMLParser):
+    def __init__(self, raw):
+        super().__init__(convert_charrefs=False)
+        self.raw = str(raw)
+        self.starts = [0] + [i + 1 for i, char in enumerate(self.raw) if char == "\n"]
+        self.chars, self.mapping = [], []
+
+    def position(self):
+        line, column = self.getpos()
+        return self.starts[line - 1] + column
+
+    def append(self, text, start, end=None):
+        self.chars.extend(text)
+        self.mapping.extend([(start, end)] * len(text) if end is not None else [(start + i, start + i + 1) for i in range(len(text))])
+
+    def handle_data(self, data):
+        self.append(data, self.position())
+
+    def handle_entityref(self, name):
+        start = self.position()
+        end = start + len(name) + 1
+        if self.raw[end:end + 1] == ";":
+            end += 1
+        self.append(html.unescape(self.raw[start:end]), start, end)
+
+    def handle_charref(self, name):
+        start = self.position()
+        end = start + len(name) + 2
+        if self.raw[end:end + 1] == ";":
+            end += 1
+        self.append(html.unescape(self.raw[start:end]), start, end)
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"p", "div", "li", "ul", "ol", "br", "h1", "h2", "h3", "tr"}:
+            self.append("\n", self.position(), self.position())
+
+    def handle_endtag(self, tag):
+        self.handle_starttag(tag, [])
+
+
+def visible_text(raw):
+    parser = MappedHTML(raw)
+    parser.feed(str(raw))
+    parser.close()
+    return "".join(parser.chars), parser.mapping
+
+
+def sentence_windows(text, max_chars=165):
+    boundaries = [0] + [m.end() for m in re.finditer(r"[!?;]+\s+|(?<!\d)\.(?!\d)\s+|\n\s*\n", text)] + [len(text)]
+    for left, right in zip(boundaries, boundaries[1:]):
+        words = list(re.finditer(r"\S+", text[left:right]))
+        if not words:
+            continue
+        if len(" ".join(text[left:right].split())) <= max_chars:
+            yield left + words[0].start(), left + words[-1].end(), True
+            continue
+        start = 0
+        while start < len(words):
+            end = start
+            while end + 1 < len(words) and len(" ".join(text[left + words[start].start():left + words[end + 1].end()].split())) <= max_chars:
+                end += 1
+            yield left + words[start].start(), left + words[end].end(), False
+            if end == len(words) - 1:
+                break
+            start = max(start + 1, end - max(1, (end - start) // 3))
+
+
+def photo_parts(value):
+    matches = list(_PHOTO_MARKER.finditer(value))
+    if not matches:
+        yield 0, len(value), None
+        return
+    if value[:matches[0].start()].strip():
+        yield 0, matches[0].start(), None
+    for index, match in enumerate(matches):
+        yield match.end(), matches[index + 1].start() if index + 1 < len(matches) else len(value), int(match.group(1))
 
 
 def attn_impl():
@@ -357,6 +578,187 @@ def qwen_chat(processor, row):
         )
 
 
+def fire_prompt_parts(row):
+    prompt = build_qwen_prompt(row)
+    prefix = "Ты решаешь бинарную классификацию товара.\n\n"
+    rule_start = len(prefix)
+    rule_end = rule_start + len(FIRE_RULES)
+    name = "" if pd.isna(row.get("name")) else str(row.get("name"))
+    desc = trim_text(row.get("description", ""), MAX_DESCRIPTION_CHARS)
+    ocr = trim_text(row.get("ocr_text", ""), MAX_OCR_CHARS)
+    name_start = rule_end + len("\n\nНазвание:\n")
+    desc_start = name_start + len(name) + len("\n\nОписание:\n")
+    fields = [("name", name, name_start), ("description", desc, desc_start)]
+    if ocr.strip():
+        intro = "\n\nТекст, автоматически распознанный на фотографиях товара (OCR).\nOCR может содержать ошибки, поэтому используй его только как дополнительный источник информации:\n\n"
+        fields.append(("ocr", ocr, desc_start + len(desc) + len(intro)))
+    rules = []
+    cursor = rule_start
+    for line in FIRE_RULES.splitlines(keepends=True):
+        plain = line.rstrip("\n")
+        if plain.startswith("- "):
+            rules.append({"rule_text": plain[2:], "char_start": cursor + 2, "char_end": cursor + len(plain)})
+        cursor += len(line)
+    return prompt, fields, rules
+
+
+def fire_candidates(row):
+    prompt, fields, rules = fire_prompt_parts(row)
+    candidates = []
+    for source, value, field_offset in fields:
+        parts = photo_parts(value) if source == "ocr" else [(0, len(value), None)]
+        for part_start, part_end, photo_number in parts:
+            cursor = part_start
+            for piece in value[part_start:part_end].split(TRIM_MARKER):
+                readable, mapping = visible_text(piece)
+                for start, end, complete in sentence_windows(readable):
+                    display = " ".join(readable[start:end].split())
+                    alpha = sum(char.isalpha() or char.isspace() for char in display) / max(1, len(display))
+                    if not 12 <= len(display) <= 165 or alpha < MIN_VISIBLE_ALPHA or re.search(r"(?:https?://|www\.)", display, re.I):
+                        continue
+                    raw_start = cursor + mapping[start][0]
+                    raw_end = cursor + mapping[end - 1][1]
+                    raw = value[raw_start:raw_end]
+                    if raw.strip() and TRIM_MARKER.strip() not in raw:
+                        candidates.append({
+                            "source": source,
+                            "fragment": raw,
+                            "display_fragment": display,
+                            "char_start": field_offset + raw_start,
+                            "char_end": field_offset + raw_end,
+                            "photo_number": photo_number,
+                            "complete_sentence": complete,
+                            "alpha_fraction": alpha,
+                        })
+                cursor += len(piece) + len(TRIM_MARKER)
+    unique = {(item["source"], item["char_start"], item["char_end"]): item for item in candidates}
+    items = list(unique.values())
+    if len(items) > MAX_TRACE_CANDIDATES:
+        items = sorted(items, key=lambda item: (-item["complete_sentence"], -item["alpha_fraction"], item["char_start"]))[:MAX_TRACE_CANDIDATES]
+    return prompt, items, rules
+
+
+def fire_token_plan(processor, row, chat, actual_ids):
+    prompt, segments, rules = fire_candidates(row)
+    chat_start = chat.index(prompt)
+    encoded = processor.tokenizer(chat, add_special_tokens=False, return_offsets_mapping=True)
+    raw = encoded["input_ids"]
+    offsets = encoded["offset_mapping"]
+    vision_end = processor.tokenizer.convert_tokens_to_ids("<|vision_end|>")
+    raw_end = raw.index(vision_end)
+    actual_end = actual_ids.index(vision_end)
+    if raw[raw_end:] != actual_ids[actual_end:]:
+        raise RuntimeError("Processor/tokenizer suffix mismatch")
+    shift = actual_end - raw_end
+
+    def bind(item):
+        start = chat_start + item["char_start"]
+        end = chat_start + item["char_end"]
+        before = max(index for index, (_, token_end) in enumerate(offsets) if 0 < token_end <= start)
+        after = max(index for index, (_, token_end) in enumerate(offsets) if 0 < token_end <= end)
+        if before <= raw_end or after <= before:
+            return None
+        return {**item, "token_before": before + shift, "token_after": after + shift}
+
+    segments = [bound for item in segments if (bound := bind(item)) is not None]
+    rules = [bound for item in rules if (bound := bind(item)) is not None]
+    positions = sorted({len(actual_ids) - 1} | {position for item in segments + rules for position in (item["token_before"], item["token_after"])})
+    lookup = {position: index for index, position in enumerate(positions)}
+    for item in segments + rules:
+        item["before_index"] = lookup[item["token_before"]]
+        item["after_index"] = lookup[item["token_after"]]
+    return segments, rules, positions
+
+
+def select_fire_evidence(segments, rules, hidden, margins, pred, boundary, class_direction):
+    if not segments or not rules:
+        return None
+    rule_vectors = []
+    for rule in rules:
+        vector = hidden[rule["after_index"]] - hidden[rule["before_index"]]
+        norm = np.linalg.norm(vector)
+        if norm > 1e-8:
+            rule_vectors.append((rule, vector / norm))
+    if not rule_vectors:
+        return None
+    direction = class_direction / max(np.linalg.norm(class_direction), 1e-8)
+    trace = []
+    absolute_deltas = []
+    for item in segments:
+        vector = hidden[item["after_index"]] - hidden[item["before_index"]]
+        norm = np.linalg.norm(vector)
+        if norm <= 1e-8:
+            continue
+        vector = vector / norm
+        similarities = [float(vector @ rule_vector) for _, rule_vector in rule_vectors]
+        best = int(np.argmax(similarities))
+        before = float(margins[item["before_index"]])
+        after = float(margins[item["after_index"]])
+        delta = after - before
+        absolute_deltas.append(abs(delta))
+        trace.append({
+            **item,
+            "nearest_rule": rule_vectors[best][0]["rule_text"],
+            "state_rule_similarity": similarities[best],
+            "delta": delta,
+            "signed_delta": (2 * pred - 1) * delta,
+            "decision_alignment": float((vector @ direction) * (2 * pred - 1)),
+        })
+    if not trace:
+        return None
+    scale = max(float(np.median(absolute_deltas)), 1e-6)
+    for item in trace:
+        item["rank_score"] = item["state_rule_similarity"] + STATE_DECISION_WEIGHT * np.tanh(item["signed_delta"] / scale) + STATE_DIRECTION_WEIGHT * item["decision_alignment"] + 0.01 * float(item["complete_sentence"])
+    ranked = sorted(trace, key=lambda item: (-item["rank_score"], item["char_start"]))
+    top = ranked[0]
+    runner_up = ranked[1] if len(ranked) > 1 else None
+    gap = top["state_rule_similarity"] - (runner_up["state_rule_similarity"] if runner_up else 0.0)
+    if top["state_rule_similarity"] < MIN_STATE_RULE_SIMILARITY or gap < MIN_STATE_RULE_GAP:
+        return None
+    modality = lambda item: "image" if item["source"] == "ocr" else "card"
+    top_modality = modality(top)
+    sources = {top_modality} | {
+        modality(item) for item in ranked[1:]
+        if modality(item) != top_modality
+        and item["nearest_rule"] == top["nearest_rule"]
+        and item["state_rule_similarity"] >= MIN_STATE_RULE_SIMILARITY
+        and item["rank_score"] >= top["rank_score"] - 0.05
+    }
+    top["evidence_sources"] = "+".join(sorted(sources))
+    return top
+
+
+def evidence_comment(category, pred, row, top, has_images):
+    verdict = "не бан" if int(pred) else "бан"
+    if category == BAD and top is None:
+        basis = "по карточке товара и изображению" if str(row.get("ocr_text", "")).strip() else "по карточке товара"
+        return f"Вердикт: {verdict}. Вывод сделан {basis}. Прямой маркировки «БАД» или «dietary supplement» в доступном тексте не найдено."
+    if top is None:
+        basis = "по данным карточки и фотографий" if has_images else "по данным карточки"
+        return f"Вердикт: {verdict}. Вывод сделан {basis}. Одну короткую цитату для пояснения выделить нельзя; карточку следует проверить целиком."
+    source = top["source"]
+    sources = set(top.get("evidence_sources", "image" if source == "ocr" else "card").split("+"))
+    basis = "по изображению товара" if sources == {"image"} else "по карточке товара" if sources == {"card"} else "по карточке товара и изображению"
+    location = {"name": "В названии", "description": "В описании", "ocr": "В тексте с фотографий"}[source]
+    quote = top["display_fragment"].replace("<", "‹").replace(">", "›").replace("«", "“").replace("»", "”")
+    comment = f"Вердикт: {verdict}. Вывод сделан {basis}. {location} указано: «{quote}»"
+    if not quote.endswith((".", "!", "?")):
+        comment += "."
+    return comment
+
+
+class FinalNormCapture:
+    def __init__(self, norm):
+        self.value = None
+        self.handle = norm.register_forward_hook(self._hook)
+
+    def _hook(self, module, args, output):
+        self.value = output.detach()
+
+    def close(self):
+        self.handle.remove()
+
+
 def run_qwen(df, images_root):
     from transformers import AutoProcessor
     try:
@@ -432,9 +834,16 @@ def run_qwen(df, images_root):
     if meta:
         raise RuntimeError(f"Meta parameters remain after LoRA load: {meta[:20]}")
 
+    norm = base.model.language_model.norm
+    head = base.get_output_embeddings()
+    label_weight = head.weight[[zero_id, one_id]].detach().float()
+    label_bias = head.bias[[zero_id, one_id]].detach().float() if head.bias is not None else None
+    class_direction = (label_weight[1] - label_weight[0]).cpu().numpy()
+
     image_paths = [get_image_paths(images_root, pid) for pid in df["id"]]
     preds = np.zeros(len(df), dtype=np.int8)
     p1s = np.zeros(len(df), dtype=np.float32)
+    comments = [""] * len(df)
 
     pool = ThreadPoolExecutor(max_workers=CPU_WORKERS)
 
@@ -446,6 +855,7 @@ def run_qwen(df, images_root):
         bs = QWEN_BATCH_SIZE
         pos = 0
         started = time.time()
+        capture = FinalNormCapture(norm) if category == FIRE else None
 
         while pos < len(idxs):
             cur = min(bs, len(idxs) - pos)
@@ -463,6 +873,13 @@ def run_qwen(df, images_root):
                     padding=True,
                     return_tensors="pt",
                 )
+                actual_ids = inputs["input_ids"].tolist()
+                plans = None
+                if category == FIRE:
+                    plans = list(pool.map(
+                        lambda args: fire_token_plan(processor, args[0], args[1], args[2]),
+                        zip(records, texts, actual_ids),
+                    ))
                 inputs = {
                     k: v.to("cuda:0", non_blocking=True)
                     for k, v in inputs.items()
@@ -480,6 +897,42 @@ def run_qwen(df, images_root):
                     p1s[j] = float(p1)
                     preds[j] = int(p1 >= threshold)
 
+                if category == BAD:
+                    tops = list(pool.map(select_bad_evidence, records))
+                    for j, record, top in zip(batch_idxs, records, tops):
+                        comments[j] = evidence_comment(BAD, preds[j], record, top, bool(image_paths[j]))
+                else:
+                    if capture.value is None or capture.value.shape[0] != len(batch_idxs):
+                        raise RuntimeError("Final norm capture failed")
+                    state_chunks = []
+                    lengths = []
+                    for local_index, plan in enumerate(plans):
+                        positions = plan[2]
+                        position_tensor = torch.tensor(positions, dtype=torch.long, device=capture.value.device)
+                        state_chunks.append(capture.value[local_index].index_select(0, position_tensor).float())
+                        lengths.append(len(positions))
+                    packed_states = torch.cat(state_chunks, dim=0)
+                    packed_margins = torch.nn.functional.linear(packed_states, label_weight, label_bias)
+                    packed_states = packed_states.cpu().numpy()
+                    packed_margins = (packed_margins[:, 1] - packed_margins[:, 0]).cpu().numpy()
+                    offset = 0
+                    for local_index, (j, record, plan) in enumerate(zip(batch_idxs, records, plans)):
+                        segments, rules, positions = plan
+                        end = offset + lengths[local_index]
+                        top = select_fire_evidence(
+                            segments,
+                            rules,
+                            packed_states[offset:end],
+                            packed_margins[offset:end],
+                            int(preds[j]),
+                            0.0,
+                            class_direction,
+                        )
+                        comments[j] = evidence_comment(FIRE, preds[j], record, top, bool(image_paths[j]))
+                        offset = end
+                    capture.value = None
+                    del state_chunks, lengths, packed_states, packed_margins
+
                 pos += len(batch_idxs)
                 elapsed = time.time() - started
                 rate = pos / max(elapsed, 1e-6)
@@ -489,7 +942,7 @@ def run_qwen(df, images_root):
                     f"{rate:.2f} product/s | ETA {eta:.1f}m",
                     flush=True,
                 )
-                del sheets, records, texts, inputs, out, logits, probs
+                del sheets, records, texts, inputs, out, logits, probs, actual_ids, plans
             except torch.OutOfMemoryError:
                 torch.cuda.empty_cache()
                 gc.collect()
@@ -498,37 +951,19 @@ def run_qwen(df, images_root):
                     raise
                 print(f"Qwen OOM -> batch={bs}", flush=True)
 
+        if capture is not None:
+            capture.close()
+
     pool.shutdown(wait=True)
     del model, base, processor
     gc.collect()
     torch.cuda.empty_cache()
-    return p1s, preds
+    if not all(comments):
+        raise RuntimeError("Comment generation completeness check failed")
+    return p1s, preds, comments
 
 
-def comment_for(category, pred):
-    if category == BAD:
-        if pred == 1:
-            return (
-                "Карточка соответствует правилам категории БАД: название, описание, "
-                "изображения и распознанный текст согласуются с требованиями этой категории."
-            )
-        return (
-            "Карточка не соответствует правилам категории БАД: в названии, описании, "
-            "изображениях или распознанном тексте есть признаки несоответствия правилам категории."
-        )
-    if pred == 1:
-        return (
-            "Карточка соответствует правилам категории легковоспламеняющихся товаров: "
-            "данные карточки и изображений согласуются с установленными критериями проверки."
-        )
-    return (
-        "Карточка не соответствует правилам категории легковоспламеняющихся товаров: "
-        "данные карточки или изображений противоречат установленным критериям проверки."
-    )
-
-
-def format_result(category, pred):
-    comment = comment_for(category, int(pred))
+def format_result(comment, pred):
     if not 50 <= len(comment) <= 300:
         raise ValueError(f"Invalid comment length: {len(comment)}")
     verdict = "не бан" if int(pred) == 1 else "бан"
@@ -595,14 +1030,14 @@ def main():
     print(f"OCR stage: {(time.time() - t0) / 60:.2f} min", flush=True)
 
     t1 = time.time()
-    p1s, preds = run_qwen(df, images_root)
+    p1s, preds, comments = run_qwen(df, images_root)
     df["p1"] = p1s
     df["pred"] = preds
     print(f"Qwen stage: {(time.time() - t1) / 60:.2f} min", flush=True)
 
     df["result"] = [
-        format_result(cat, pred)
-        for cat, pred in zip(df["category"], df["pred"])
+        format_result(comment, pred)
+        for comment, pred in zip(comments, df["pred"])
     ]
 
     out = df[["id", "result"]].copy()
